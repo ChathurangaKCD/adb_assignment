@@ -61,7 +61,7 @@ public class Table
      */
     private final List <Comparable []> tuples;
 
-    /** Primary key. 
+    /** Primary key.
      */
     private final String [] key;
 
@@ -75,7 +75,7 @@ public class Table
 
     /** The map type to be used for indices.  Change as needed.
      */
-    private static final MapType mType = MapType.TREE_MAP;
+    private static final MapType mType = MapType.NO_MAP;
 
     /************************************************************************************
      * Make a map (index) given the MapType.
@@ -101,7 +101,7 @@ public class Table
      * @param _attribute  the string containing attributes names
      * @param _domain     the string containing attribute domains (data types)
      * @param _key        the primary key
-     */  
+     */
     public Table (String _name, String [] _attribute, Class [] _domain, String [] _key)
     {
         name      = _name;
@@ -121,7 +121,7 @@ public class Table
      * @param _domain     the string containing attribute domains (data types)
      * @param _key        the primary key
      * @param _tuples     the list of tuples containing the data
-     */  
+     */
     public Table (String _name, String [] _attribute, Class [] _domain, String [] _key,
                   List <Comparable []> _tuples)
     {
@@ -170,8 +170,11 @@ public class Table
 
         List <Comparable []> rows = new ArrayList <> ();
 
-        //  T O   B E   I M P L E M E N T E D 
-
+        //  T O   B E   I M P L E M E N T E D
+        for (Comparable [] tuple : tuples){
+            Comparable[] row = extract(tuple, attrs);
+            rows.add(row);
+        }
         return new Table (name + count++, attrs, colDomain, newKey, rows);
     } // project
 
@@ -209,7 +212,12 @@ public class Table
         List <Comparable []> rows = new ArrayList <> ();
 
         //  T O   B E   I M P L E M E N T E D 
-
+        for (Comparable[] row: tuples){
+            if(keyVal.equals(new KeyType(row[0]))){
+                // function only accepts KeyType object, assuming first attribute since no attribute names are given.
+                rows.add(row);
+            }
+        }
         return new Table (name + count++, attribute, domain, key, rows);
     } // select
 
@@ -228,8 +236,18 @@ public class Table
 
         List <Comparable []> rows = new ArrayList <> ();
 
-        //  T O   B E   I M P L E M E N T E D 
-
+        //  T O   B E   I M P L E M E N T E D
+        Map<KeyType, Comparable[]> tupleMap = new HashMap<>();
+        for (Comparable[] tuple : tuples){
+            tupleMap.put(new KeyType(tuple), tuple);
+            rows.add(tuple);
+        }
+        for (Comparable[] tuple: table2.getTuples()){
+            if(tupleMap.containsKey(new KeyType(tuple))){
+                continue;
+            }
+            rows.add(tuple);
+        }
         return new Table (name + count++, attribute, domain, key, rows);
     } // union
 
@@ -250,7 +268,16 @@ public class Table
         List <Comparable []> rows = new ArrayList <> ();
 
         //  T O   B E   I M P L E M E N T E D 
-
+        Map<KeyType, Comparable[]> table2_TupleMap = new HashMap<>();
+        for (Comparable[] tuple : table2.getTuples()){
+            table2_TupleMap.put(new KeyType(tuple), tuple);
+        }
+        for (Comparable[] tuple: tuples){
+            if(table2_TupleMap.containsKey(new KeyType(tuple))){
+                continue;
+            }
+            rows.add(tuple);
+        }
         return new Table (name + count++, attribute, domain, key, rows);
     } // minus
 
@@ -277,9 +304,30 @@ public class Table
 
         List <Comparable []> rows = new ArrayList <> ();
 
-        //  T O   B E   I M P L E M E N T E D 
+        //  T O   B E   I M P L E M E N T E D
+        // append "2" to duplicate attribute names
+        List<String> t1_attrs_list  = Arrays.asList(attribute);
+        String[] t2_attrs  = new String[table2.attribute.length];
+        for (int i = 0; i < t2_attrs.length; i++) {
+            String attr = table2.attribute[i];
+            if(t1_attrs_list.contains(attr)){
+                attr+=2;
+            }
+            t2_attrs[i]=attr;
+        }
+        // nested loop join
+        for (Comparable[] t:tuples){
+            KeyType key_t = new KeyType(extract(t, t_attrs));
+            for (Comparable[] u: table2.tuples){
+                KeyType key_u = new KeyType(table2.extract(u,u_attrs));
+                if (key_t.equals(key_u)){
+                    Comparable[] row = ArrayUtil.concat(t,u);
+                    rows.add(row);
+                }
+            }
+        }
 
-        return new Table (name + count++, ArrayUtil.concat (attribute, table2.attribute),
+        return new Table (name + count++, ArrayUtil.concat (attribute, t2_attrs),
                                           ArrayUtil.concat (domain, table2.domain), key, rows);
     } // join
 
@@ -330,8 +378,52 @@ public class Table
         //  T O   B E   I M P L E M E N T E D 
 
         // FIX - eliminate duplicate columns
-        return new Table (name + count++, ArrayUtil.concat (attribute, table2.attribute),
-                                          ArrayUtil.concat (domain, table2.domain), key, rows);
+        String[] t1_attrs = attribute;
+        String[] t2_attrs = table2.attribute;
+        List<String> unique_attrs_in_t2 = new ArrayList<>();
+        List<String> common_attrs_list = new ArrayList<>();
+        for (String a2: t2_attrs){
+            for(String a1: t1_attrs){
+                if(a1.equals(a2)){
+                    common_attrs_list.add(a2);
+                }
+                else{
+                    unique_attrs_in_t2.add(a2);
+                }
+            }
+        }
+        // t2 attributes not in t1
+        t2_attrs = (String[]) unique_attrs_in_t2.toArray();
+        // common columns
+        String[] common_attrs = (String[]) common_attrs_list.toArray();
+
+        // nested loop join
+        for (Comparable[] t:tuples){
+            KeyType key_t = new KeyType(extract(t, common_attrs));
+            for (Comparable[] u: table2.tuples){
+                KeyType key_u = new KeyType(table2.extract(u,common_attrs));
+                if (key_t.equals(key_u)){
+                    // merge unique columns
+                    Comparable[] row = ArrayUtil.concat(t,table2.extract(u, t2_attrs));
+                    rows.add(row);
+                }
+            }
+        }
+        // t2 domains
+        Class [] t2_domain = table2.extractDom(table2.match(t2_attrs),table2.domain);
+        // key
+        String[] keys_t1 = key;
+        String[] keys_t2 = table2.key;
+        List<String> key_attrs = new ArrayList<>();
+        key_attrs.addAll(Arrays.asList(keys_t1));
+        for (String key_t2:keys_t2){
+            if(key_attrs.contains(key_t2))continue;;
+            key_attrs.add(key_t2);
+        }
+        String[] key_attrs_arr = ((String[]) key_attrs.toArray());
+
+        return new Table (name + count++, ArrayUtil.concat (attribute, t2_attrs),
+                                          ArrayUtil.concat (domain, t2_domain), key_attrs_arr, rows);
     } // join
 
     /************************************************************************************
@@ -517,7 +609,7 @@ public class Table
      *
      * @param t       the tuple to extract from
      * @param column  the array of column names
-     * @return  a smaller tuple extracted from tuple t 
+     * @return  a smaller tuple extracted from tuple t
      */
     private Comparable [] extract (Comparable [] t, String [] column)
     {
@@ -536,9 +628,15 @@ public class Table
      *          with the given domains
      */
     private boolean typeCheck (Comparable [] t)
-    { 
-        //  T O   B E   I M P L E M E N T E D 
-
+    {
+        //  T O   B E   I M P L E M E N T E D
+        if (t.length != attribute.length) return false;
+        for (int i = 0; i < domain.length; i++) {
+            Class valueClass = t[i].getClass();
+            if (!domain[i].equals(valueClass)) {
+                return false;
+            }
+        }
         return true;
     } // typeCheck
 
